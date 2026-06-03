@@ -614,20 +614,7 @@ HTML_TEMPLATE = """
                 paged.forEach(dev => {
                     const isSafe = cachedSafeMacs.includes(dev.mac);
                     const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : `<button class="btn btn-safe" onclick="markSafe('${dev.mac}')">Mark Safe</button>`;
-                    html += `<tr>
-                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                        <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
-                        <td>${dev.vendor}</td>
-                        <td><span class="badge">${dev.hits}</span></td>
-                        <td>${dev.last_seen}</td>
-                        <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
-                        <td>
-                            <div style="display:flex; gap:5px;">
-                                ${btn}
-                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button>
-                            </div>
-                        </td>
-                    </tr>`;
+                    html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td><td>${dev.vendor}</td><td><span class="badge">${dev.hits}</span></td><td>${dev.last_seen}</td><td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td><td><div style="display:flex; gap:5px;">${btn}<button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button></div></td></tr>`;
                 });
             }
             table.innerHTML = html;
