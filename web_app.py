@@ -151,6 +151,7 @@ HTML_TEMPLATE = """
             <label style="cursor: pointer; user-select: none; margin-left: 10px; font-size: 14px;">
                 <input type="checkbox" id="hide-unknown" onchange="handleSearch()"> Hide Unknown/Random
             </label>
+            <button class="btn btn-safe" style="margin-left: 10px;" onclick="exportCurrentView()">Export to CSV</button>
             <div id="pagination-controls" class="pagination"></div>
         </div>
 
@@ -284,6 +285,7 @@ HTML_TEMPLATE = """
         let cachedSafeMacs = [];
         let currentPage = 1;
         const itemsPerPage = 50;
+        let currentRawData = []; // Stores the raw data for the current tab
 
         function showTab(tabId, el) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -294,6 +296,33 @@ HTML_TEMPLATE = """
             currentPage = 1;
             document.getElementById('global-search').value = '';
             refreshTab();
+        }
+
+        function exportCurrentView() {
+            const filtered = getFilteredData(currentRawData);
+            if (filtered.length === 0) { showToast('No data to export'); return; }
+
+            const headers = Object.keys(filtered[0]);
+            const csvRows = [headers.join(',')];
+            
+            for (const row of filtered) {
+                const values = headers.map(header => {
+                    const val = row[header] === null ? '' : row[header];
+                    const escaped = ('' + val).replace(/"/g, '""');
+                    return `"${escaped}"`;
+                });
+                csvRows.push(values.join(','));
+            }
+            
+            const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('hidden', '');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `wifisniffer_${currentTab}_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
 
         function copyToClipboard(text) {
@@ -410,6 +439,7 @@ HTML_TEMPLATE = """
         async function loadRegressionsList() {
             const res = await fetch('/api/regressions');
             const data = await res.json();
+            currentRawData = data;
             const filtered = getFilteredData(data);
             renderPagination(filtered.length);
             const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -439,6 +469,7 @@ HTML_TEMPLATE = """
         async function loadCarsList() {
             const res = await fetch('/api/cars');
             const data = await res.json();
+            currentRawData = data;
             const filtered = getFilteredData(data);
             renderPagination(filtered.length);
             const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -556,12 +587,14 @@ HTML_TEMPLATE = """
             const resData = await fetch('/api/data');
             const data = await resData.json();
             cachedLiveData = data;
+            currentRawData = data;
             renderLiveTable(data);
         }
 
         async function loadHistoryList() {
             const res = await fetch('/api/data');
             const data = await res.json();
+            currentRawData = data;
             const filtered = getFilteredData(data);
             const displayData = filtered.slice(0, 500); 
 
@@ -602,6 +635,7 @@ HTML_TEMPLATE = """
         async function loadAnalysis() {
             const res = await fetch('/api/analysis');
             const data = await res.json();
+            currentRawData = data;
             const filtered = getFilteredData(data);
             renderPagination(filtered.length);
             const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -618,6 +652,7 @@ HTML_TEMPLATE = """
         async function loadSafeList() {
             const res = await fetch('/api/safe_list');
             const data = await res.json();
+            currentRawData = data;
             const filtered = getFilteredData(data);
             renderPagination(filtered.length);
             const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
