@@ -278,6 +278,13 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        // Global error handler
+        window.onerror = function(msg, url, line) {
+            console.error(`JS Error: ${msg} at ${url}:${line}`);
+            showToast(`JS Error: ${msg}`);
+            return false;
+        };
+
         let currentTab = 'live';
         let selectedMac = null;
         let liveSort = { column: 'last_seen', direction: 'desc' };
