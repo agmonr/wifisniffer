@@ -480,21 +480,7 @@ HTML_TEMPLATE = """
                     html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
                 } else {
                     paged.forEach(dev => {
-                        html += `
-                            <tr>
-                                <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                                <td>${dev.vendor}</td>
-                                <td><span class="badge">${dev.days_seen} days</span></td>
-                                <td>${dev.hits}</td>
-                                <td>${dev.first_seen}</td>
-                                <td>${dev.last_seen}</td>
-                                <td>
-                                    <div style="display:flex; gap:5px;">
-                                        <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
-                                        <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
-                                    </div>
-                                </td>
-                            </tr>`;
+                        html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td>${dev.vendor}</td><td><span class="badge">${dev.days_seen} days</span></td><td>${dev.hits}</td><td>${dev.first_seen}</td><td>${dev.last_seen}</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button></div></td></tr>`;
                     });
                 }
                 table.innerHTML = html;
@@ -519,21 +505,7 @@ HTML_TEMPLATE = """
                     html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
                 } else {
                     paged.forEach(dev => {
-                        html += `
-                            <tr>
-                                <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                                <td>${dev.vendor}</td>
-                                <td><span class="badge">${dev.hits}</span></td>
-                                <td>${dev.first_seen}</td>
-                                <td>${dev.last_seen}</td>
-                                <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
-                                <td>
-                                    <div style="display:flex; gap:5px;">
-                                        <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
-                                        <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
-                                    </div>
-                                </td>
-                            </tr>`;
+                        html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td>${dev.vendor}</td><td><span class="badge">${dev.hits}</span></td><td>${dev.first_seen}</td><td>${dev.last_seen}</td><td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button></div></td></tr>`;
                     });
                 }
                 table.innerHTML = html;
