@@ -95,9 +95,9 @@ HTML_TEMPLATE = """
         table { width: 100%; border-collapse: collapse; background: #252525; border-radius: 8px; overflow: hidden; margin-top: 10px; }
         th { background: #333; color: #00ffcc; text-align: left; padding: 12px; cursor: pointer; user-select: none; position: relative; }
         th:hover { background: #444; }
-        th::after { content: '↕'; position: absolute; right: 8px; color: #666; font-size: 12px; }
-        th.sort-asc::after { content: '↑'; color: #00ffcc; }
-        th.sort-desc::after { content: '↓'; color: #00ffcc; }
+        th::after { content: 'â'; position: absolute; right: 8px; color: #666; font-size: 12px; }
+        th.sort-asc::after { content: 'â'; color: #00ffcc; }
+        th.sort-desc::after { content: 'â'; color: #00ffcc; }
         td { padding: 12px; border-bottom: 1px solid #333; }
         tr:hover { background: #2d2d2d; }
         .history-layout { display: grid; grid-template-columns: 350px 1fr; gap: 20px; }
@@ -278,10 +278,10 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        // Global error handler
         window.onerror = function(msg, url, line) {
-            console.error(`JS Error: ${msg} at ${url}:${line}`);
-            showToast(`JS Error: ${msg}`);
+            const escapedMsg = msg.replace(/\n/g, '\\n');
+            console.error('JS Error: ' + escapedMsg + ' at ' + url + ':' + line);
+            showToast('JS Error: ' + escapedMsg);
             return false;
         };
 
@@ -316,7 +316,7 @@ HTML_TEMPLATE = """
                 const values = headers.map(header => {
                     const val = row[header] === null ? '' : row[header];
                     const escaped = ('' + val).replace(/"/g, '""');
-                    return `"${escaped}"`;
+                    return '"' + escaped + '"';
                 });
                 csvRows.push(values.join(','));
             }
@@ -326,7 +326,7 @@ HTML_TEMPLATE = """
             const a = document.createElement('a');
             a.setAttribute('hidden', '');
             a.setAttribute('href', url);
-            a.setAttribute('download', `wifisniffer_${currentTab}_${new Date().toISOString().split('T')[0]}.csv`);
+            a.setAttribute('download', 'wifisniffer_' + currentTab + '_' + new Date().toISOString().split('T')[0] + '.csv');
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -341,7 +341,7 @@ HTML_TEMPLATE = """
                 textArea.select();
                 try {
                     document.execCommand('copy');
-                    showToast(`Copied: ${text}`);
+                    showToast('Copied: ' + text);
                 } catch (err) {
                     console.error('Fallback copy failed', err);
                 }
@@ -349,7 +349,7 @@ HTML_TEMPLATE = """
                 return;
             }
             navigator.clipboard.writeText(text).then(() => {
-                showToast(`Copied: ${text}`);
+                showToast('Copied: ' + text);
             }).catch(err => {
                 console.error('Clipboard write failed', err);
             });
@@ -394,7 +394,7 @@ HTML_TEMPLATE = """
             try {
                 const res = await fetch('/api/maintenance/clean', { method: 'POST' });
                 const data = await res.json();
-                status.innerText = `Success: ${data.deleted} records removed.`;
+                status.innerText = 'Success: ' + data.deleted + ' records removed.';
                 status.style.color = '#00cc66';
                 loadMaintenanceStats();
             } catch (err) {
@@ -426,14 +426,6 @@ HTML_TEMPLATE = """
                 filtered = filtered.filter(d => !cachedSafeMacs.includes(d.mac));
             }
 
-            if (hideUnknown) {
-                filtered = filtered.filter(d => {
-                    const isUnknown = d.vendor === 'Unknown';
-                    // Randomized MACs have 2, 6, A, or E as the second hex digit
-                    const isRandom = d.mac && /^[0-9a-f][26ae]/i.test(d.mac);
-                    return !isUnknown && !isRandom;
-                });
-            }
             return filtered;
         }
 
@@ -442,7 +434,7 @@ HTML_TEMPLATE = """
             const totalPages = Math.ceil(totalItems / itemsPerPage);
             if (totalPages <= 1) { container.innerHTML = ''; return; }
             
-            let html = `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">Prev</button>`;
+            let html = '<button class="page-btn" ' + (currentPage === 1 ? 'disabled' : '') + ' onclick="changePage(' + (currentPage - 1) + ')">Prev</button>';
             
             const start = Math.max(1, currentPage - 2);
             const end = Math.min(totalPages, currentPage + 2);
@@ -450,12 +442,12 @@ HTML_TEMPLATE = """
             if (start > 1) html += '<button class="page-btn" onclick="changePage(1)">1</button><span>...</span>';
             
             for (let i = start; i <= end; i++) {
-                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+                html += '<button class="page-btn ' + (i === currentPage ? 'active' : '') + '" onclick="changePage(' + i + ')">' + i + '</button>';
             }
             
-            if (end < totalPages) html += `<span>...</span><button class="page-btn" onclick="changePage(${totalPages})">${totalPages}</button>`;
+            if (end < totalPages) html += '<span>...</span><button class="page-btn" onclick="changePage(' + totalPages + ')">' + totalPages + '</button>';
             
-            html += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">Next</button>`;
+            html += '<button class="page-btn" ' + (currentPage === totalPages ? 'disabled' : '') + ' onclick="changePage(' + (currentPage + 1) + ')">Next</button>';
             container.innerHTML = html;
         }
 
@@ -477,14 +469,13 @@ HTML_TEMPLATE = """
                 let html = '';
                 if (paged.length === 0) {
                     const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No regressions found with current filters.';
-                    html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                    html = '<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">' + msg + '</td></tr>';
                 } else {
                     paged.forEach(dev => {
-                        html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td>${dev.vendor}</td><td><span class="badge">${dev.days_seen} days</span></td><td>${dev.hits}</td><td>${dev.first_seen}</td><td>${dev.last_seen}</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button></div></td></tr>`;
+                        html += '<tr><td><code>' + dev.mac + '</code> <button class="copy-btn" onclick="copyToClipboard(\'' + dev.mac + '\')" title="Copy MAC">📋</button></td><td>' + dev.vendor + '</td><td><span class="badge">' + dev.days_seen + ' days</span></td><td>' + dev.hits + '</td><td>' + dev.first_seen + '</td><td>' + dev.last_seen + '</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory(\'' + dev.mac + '\')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard(\'' + dev.mac + ', ' + dev.vendor + '\')" title="Copy Row">Row</button></div></td></tr>';
                     });
                 }
-                table.innerHTML = html;
-            } catch (e) {
+                table.innerHTML = html;            } catch (e) {
                 console.error("Failed to load regressions:", e);
             }
         }
@@ -502,10 +493,10 @@ HTML_TEMPLATE = """
                 let html = '';
                 if (paged.length === 0) {
                     const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No cars found with current filters.';
-                    html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                    html = '<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">' + msg + '</td></tr>';
                 } else {
                     paged.forEach(dev => {
-                        html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td>${dev.vendor}</td><td><span class="badge">${dev.hits}</span></td><td>${dev.first_seen}</td><td>${dev.last_seen}</td><td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button></div></td></tr>`;
+                        html += '<tr><td><code>' + dev.mac + '</code> <button class="copy-btn" onclick="copyToClipboard(\'' + dev.mac + '\')" title="Copy MAC">📋</button></td><td>' + dev.vendor + '</td><td><span class="badge">' + dev.hits + '</span></td><td>' + dev.first_seen + '</td><td>' + dev.last_seen + '</td><td>' + (dev.ssids || '').split(',').map(s => s ? '<a href="/api/export/ssid?ssid=' + encodeURIComponent(s) + '" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">' + s + '</a>' : '').join(', ') + '</td><td><div style="display:flex; gap:5px;"><button class="btn btn-safe" onclick="showHistory(\'' + dev.mac + '\')">View Logs</button><button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard(\'' + dev.mac + ', ' + dev.vendor + '\')" title="Copy Row">Row</button></div></td></tr>';
                     });
                 }
                 table.innerHTML = html;
@@ -534,7 +525,7 @@ HTML_TEMPLATE = """
             }
             document.querySelectorAll('#live th').forEach(th => {
                 th.classList.remove('sort-asc', 'sort-desc');
-                if (th.getAttribute('onclick') && th.getAttribute('onclick').includes(`'${column}'`)) {
+                if (th.getAttribute('onclick') && th.getAttribute('onclick').includes("'" + column + "'")) {
                     th.classList.add(liveSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
                 }
             });
@@ -581,12 +572,12 @@ HTML_TEMPLATE = """
             let html = '';
             if (paged.length === 0) {
                 const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No results found with current filters.';
-                html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                html = '<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">' + msg + '</td></tr>';
             } else {
                 paged.forEach(dev => {
                     const isSafe = cachedSafeMacs.includes(dev.mac);
-                    const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : `<button class="btn btn-safe" onclick="markSafe('${dev.mac}')">Mark Safe</button>`;
-                    html += `<tr><td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td><td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td><td>${dev.vendor}</td><td><span class="badge">${dev.hits}</span></td><td>${dev.last_seen}</td><td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td><td><div style="display:flex; gap:5px;">${btn}<button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button></div></td></tr>`;
+                    const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : '<button class="btn btn-safe" onclick="markSafe(\'' + dev.mac + '\')">Mark Safe</button>';
+                    html += '<tr><td><code>' + dev.mac + '</code> <button class="copy-btn" onclick="copyToClipboard(\'' + dev.mac + '\')" title="Copy MAC">📋</button></td><td class="' + (dev.type === 'Access Point' ? 'type-ap' : 'type-dev') + '">' + dev.type + '</td><td>' + dev.vendor + '</td><td><span class="badge">' + dev.hits + '</span></td><td>' + dev.last_seen + '</td><td>' + (dev.ssids || '').split(',').map(s => s ? '<a href="/api/export/ssid?ssid=' + encodeURIComponent(s) + '" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">' + s + '</a>' : '').join(', ') + '</td><td><div style="display:flex; gap:5px;">' + btn + '<button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard(\'' + dev.mac + ', ' + dev.vendor + ', ' + (dev.ssids || '') + '\')" title="Copy Row">Row</button></div></td></tr>';
                 });
             }
             table.innerHTML = html;
@@ -610,18 +601,18 @@ HTML_TEMPLATE = """
                 const displayData = filtered.slice(0, 500); 
 
                 const list = document.getElementById('device-list');
-                list.innerHTML = `<h3>Devices (${filtered.length})</h3>`;
+                list.innerHTML = '<h3>Devices (' + filtered.length + ')</h3>';
                 if (filtered.length === 0) {
                     const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No devices match filters.';
-                    list.innerHTML += `<div style="text-align:center; padding:20px; color:#888;">${msg}</div>`;
+                    list.innerHTML += '<div style="text-align:center; padding:20px; color:#888;">' + msg + '</div>';
                     return;
                 }
                 const fragment = document.createDocumentFragment();
                 displayData.forEach(dev => {
                     const div = document.createElement('div');
-                    div.className = `device-item ${selectedMac === dev.mac ? 'selected' : ''}`;
+                    div.className = 'device-item ' + (selectedMac === dev.mac ? 'selected' : '');
                     div.onclick = () => loadTimeline(dev.mac);
-                    div.innerHTML = `<strong>${dev.mac}</strong><br><small>${dev.vendor}</small><br><small style="color: #888;">${dev.ssids || ''}</small>`;
+                    div.innerHTML = '<strong>' + dev.mac + '</strong><br><small>' + dev.vendor + '</small><br><small style="color: #888;">' + (dev.ssids || '') + '</small>';
                     fragment.appendChild(div);
                 });
                 list.appendChild(fragment);
@@ -640,19 +631,19 @@ HTML_TEMPLATE = """
             try {
                 selectedMac = mac;
                 loadHistoryList();
-                const [resHist, resSafe] = await Promise.all([fetch(`/api/history?mac=${mac}`), fetch(`/api/is_safe?mac=${mac}`)]);
+                const [resHist, resSafe] = await Promise.all([fetch('/api/history?mac=' + mac), fetch('/api/is_safe?mac=' + mac)]);
                 const logs = await resHist.json();
                 const isSafe = (await resSafe.json()).safe;
                 
                 const timeline = document.getElementById('timeline');
-                let html = `<div style="display:flex; justify-content:space-between; align-items:center;"><h3>History: ${mac}</h3>${isSafe ? '<span style="color:#0c6;">[SAFE]</span>' : `<button class="btn btn-safe" onclick="markSafe('${mac}')">Mark Safe</button>`}</div>`;
+                let html = '<div style="display:flex; justify-content:space-between; align-items:center;"><h3>History: ' + mac + '</h3>' + (isSafe ? '<span style="color:#0c6;">[SAFE]</span>' : '<button class="btn btn-safe" onclick="markSafe(\'' + mac + '\')">Mark Safe</button>') + '</div>';
                 html += '<table><thead><tr><th>Time</th><th>Type</th><th>SSID</th></tr></thead><tbody>';
-                logs.forEach(l => { html += `<tr><td>${l.timestamp}</td><td>${l.type}</td><td>${l.ssid || ''}</td></tr>`; });
+                logs.forEach(l => { html += '<tr><td>' + l.timestamp + '</td><td>' + l.type + '</td><td>' + (l.ssid || '') + '</td></tr>'; });
                 html += '</tbody></table>';
                 timeline.innerHTML = html;
             } catch (e) {
                 console.error("Failed to load timeline:", e);
-                document.getElementById('timeline').innerHTML = `<h3 style="color:#ff3333;">Error loading history for ${mac}</h3>`;
+                document.getElementById('timeline').innerHTML = '<h3 style="color:#ff3333;">Error loading history for ' + mac + '</h3>';
             }
         }
 
@@ -669,11 +660,11 @@ HTML_TEMPLATE = """
                 let html = '';
                 if (paged.length === 0) {
                     const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No anomalies found with current filters.';
-                    html = `<tr><td colspan="6" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                    html = '<tr><td colspan="6" style="text-align:center; padding:50px; color:#888;">' + msg + '</td></tr>';
                 } else {
                     paged.forEach(r => {
                         const scoreClass = r.score > 60 ? 'score-high' : (r.score > 30 ? 'score-mid' : 'score-low');
-                        html += `<tr><td><code>${r.mac}</code></td><td class="${scoreClass}">${r.score}</td><td>${r.vendor}</td><td>${r.reasons}</td><td>${r.ssids || ''}</td><td><button class="btn btn-safe" onclick="markSafe('${r.mac}')">Mark Safe</button></td></tr>`;
+                        html += '<tr><td><code>' + r.mac + '</code></td><td class="' + scoreClass + '">' + r.score + '</td><td>' + r.vendor + '</td><td>' + r.reasons + '</td><td>' + (r.ssids || '') + '</td><td><button class="btn btn-safe" onclick="markSafe(\'' + r.mac + '\')">Mark Safe</button></td></tr>';
                     });
                 }
                 table.innerHTML = html;
@@ -695,21 +686,10 @@ HTML_TEMPLATE = """
                 let html = '';
                 if (paged.length === 0) {
                     const msg = data.length === 0 ? 'No safe devices recorded yet.' : 'No results found with current filters.';
-                    html = `<tr><td colspan="9" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                    html = '<tr><td colspan="9" style="text-align:center; padding:50px; color:#888;">' + msg + '</td></tr>';
                 } else {
                     paged.forEach(dev => {
-                        html += `
-                            <tr>
-                                <td><code>${dev.mac}</code></td>
-                                <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
-                                <td>${dev.vendor}</td>
-                                <td><span class="badge">${dev.hits}</span></td>
-                                <td>${dev.first_seen}</td>
-                                <td>${dev.last_seen}</td>
-                                <td>${dev.ssids || ''}</td>
-                                <td>${dev.marked_at}</td>
-                                <td><button class="btn btn-unsafe" onclick="unmarkSafe('${dev.mac}')">Unmark</button></td>
-                            </tr>`;
+                        html += '<tr><td><code>' + dev.mac + '</code></td><td class="' + (dev.type === 'Access Point' ? 'type-ap' : 'type-dev') + '">' + dev.type + '</td><td>' + dev.vendor + '</td><td><span class="badge">' + dev.hits + '</span></td><td>' + dev.first_seen + '</td><td>' + dev.last_seen + '</td><td>' + (dev.ssids || '') + '</td><td>' + dev.marked_at + '</td><td><button class="btn btn-unsafe" onclick="unmarkSafe(\'' + dev.mac + '\')">Unmark</button></td></tr>';
                     });
                 }
                 table.innerHTML = html;
