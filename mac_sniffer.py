@@ -25,7 +25,8 @@ db_conn = None
 def init_db():
     """Initializes the database and populates the log cooldown cache."""
     global last_log_time
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS detections (
@@ -85,7 +86,8 @@ def save_to_db(mac, mtype, vendor, ssid):
     global db_conn
     try:
         if db_conn is None:
-            db_conn = sqlite3.connect(DB_FILE)
+            db_conn = sqlite3.connect(DB_FILE, timeout=30)
+            db_conn.execute('PRAGMA journal_mode=WAL')
         
         cursor = db_conn.cursor()
         cursor.execute('''

@@ -1,8 +1,10 @@
 import sqlite3
 import os
+import io
+import csv
 import pandas as pd
 import numpy as np
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, Response
 
 app = Flask(__name__)
 DB_FILE = "discovered_macs.db"
@@ -20,7 +22,8 @@ CAR_VENDORS = [
 ]
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS detections (
@@ -32,6 +35,39 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_detections_mac ON detections(mac)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_detections_timestamp ON detections(timestamp)')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS device_summary (
+            mac TEXT PRIMARY KEY,
+            type TEXT,
+            vendor TEXT,
+            hits INTEGER DEFAULT 0,
+            first_seen TIMESTAMP,
+            last_seen TIMESTAMP,
+            ssids TEXT
+        )
+    ''')
+    
+    cursor.execute('''
+    CREATE TRIGGER IF NOT EXISTS update_device_summary AFTER INSERT ON detections
+    BEGIN
+        INSERT INTO device_summary (mac, type, vendor, hits, first_seen, last_seen, ssids)
+        VALUES (NEW.mac, NEW.type, NEW.vendor, 1, NEW.timestamp, NEW.timestamp, NEW.ssid)
+        ON CONFLICT(mac) DO UPDATE SET
+            hits = hits + 1,
+            last_seen = NEW.timestamp,
+            ssids = CASE 
+                WHEN ssids IS NULL OR ssids = '' THEN NEW.ssid
+                WHEN NEW.ssid IS NULL OR NEW.ssid = '' THEN ssids
+                WHEN INSTR(',' || ssids || ',', ',' || NEW.ssid || ',') = 0 THEN ssids || ',' || NEW.ssid
+                ELSE ssids
+            END,
+            type = CASE WHEN NEW.type = 'Access Point' THEN 'Access Point' ELSE type END;
+    END;
+    ''')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS safe_devices (
             mac TEXT PRIMARY KEY,
@@ -78,11 +114,23 @@ HTML_TEMPLATE = """
         .score-low { color: #00ffcc; }
         .type-ap { color: #ff9900; font-weight: bold; }
         .type-dev { color: #00ccff; }
-        .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; background: #444; }
-        code { background: #111; padding: 2px 4px; border-radius: 3px; color: #ff66cc; }
+        .search-container { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+        .search-input { padding: 8px 12px; border-radius: 4px; border: 1px solid #333; background: #252525; color: #fff; width: 300px; }
+        .pagination { display: flex; gap: 5px; margin-top: 15px; justify-content: center; }
+        .page-btn { padding: 5px 10px; background: #333; border: 1px solid #444; color: #fff; cursor: pointer; border-radius: 4px; }
+        .page-btn.active { background: #00ffcc; color: #1a1a1a; font-weight: bold; }
+        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .copy-btn { background: transparent; border: none; color: #666; cursor: pointer; padding: 2px 5px; font-size: 14px; border-radius: 4px; transition: color 0.2s; }
+        .copy-btn:hover { color: #00ffcc; background: #333; }
+        #toast { 
+            position: fixed; bottom: 20px; right: 20px; background: #00ffcc; color: #1a1a1a; 
+            padding: 10px 20px; border-radius: 4px; font-weight: bold; 
+            opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 1000;
+        }
     </style>
 </head>
 <body>
+    <div id="toast">Copied to clipboard!</div>
     <div class="container">
         <h1>WIFISNIFFER</h1>
         <div class="nav">
@@ -92,14 +140,21 @@ HTML_TEMPLATE = """
             <div class="nav-item" onclick="showTab('regressions', this)">Regressions</div>
             <div class="nav-item" onclick="showTab('analysis', this)">Analysis</div>
             <div class="nav-item" onclick="showTab('safe', this)">Safe Records</div>
+            <div class="nav-item" onclick="showTab('maintenance', this)">Maintenance</div>
+        </div>
+
+        <div class="search-container">
+            <input type="text" id="global-search" class="search-input" placeholder="Search MAC, Vendor, or SSID..." oninput="handleSearch()">
+            <label style="cursor: pointer; user-select: none; margin-left: 10px; font-size: 14px;">
+                <input type="checkbox" id="hide-safe" onchange="handleSearch()"> Hide Safe
+            </label>
+            <label style="cursor: pointer; user-select: none; margin-left: 10px; font-size: 14px;">
+                <input type="checkbox" id="hide-unknown" onchange="handleSearch()"> Hide Unknown/Random
+            </label>
+            <div id="pagination-controls" class="pagination"></div>
         </div>
 
         <div id="live" class="tab-content active">
-            <div style="margin-bottom: 15px; background: #252525; padding: 10px; border-radius: 8px; display: inline-block;">
-                <label style="cursor: pointer; user-select: none;">
-                    <input type="checkbox" id="hide-safe" onchange="renderLiveTable(cachedLiveData)"> Hide Safe Devices
-                </label>
-            </div>
             <table>
                 <thead>
                     <tr>
@@ -189,6 +244,36 @@ HTML_TEMPLATE = """
                 <tbody id="safe-table"></tbody>
             </table>
         </div>
+
+        <div id="maintenance" class="tab-content">
+            <h2>Database Maintenance</h2>
+            <div style="background: #252525; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h3>Statistics</h3>
+                <div id="db-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                    <div style="background: #333; padding: 15px; border-radius: 4px;">
+                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">DATABASE SIZE</div>
+                        <div id="stat-size" style="font-size: 24px; color: #00ffcc;">-</div>
+                    </div>
+                    <div style="background: #333; padding: 15px; border-radius: 4px;">
+                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">TOTAL DETECTIONS</div>
+                        <div id="stat-detections" style="font-size: 24px; color: #00ffcc;">-</div>
+                    </div>
+                    <div style="background: #333; padding: 15px; border-radius: 4px;">
+                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">UNIQUE DEVICES</div>
+                        <div id="stat-devices" style="font-size: 24px; color: #00ffcc;">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="background: #252525; padding: 20px; border-radius: 8px;">
+                <h3>Cleanup Tasks</h3>
+                <p style="color: #888;">Remove old records to keep the database performant.</p>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button class="btn btn-unsafe" style="padding: 10px 20px;" onclick="cleanOldRecords()">Purge Records Older Than 30 Days</button>
+                    <span id="clean-status" style="font-size: 14px; color: #888;"></span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -197,6 +282,8 @@ HTML_TEMPLATE = """
         let liveSort = { column: 'last_seen', direction: 'desc' };
         let cachedLiveData = [];
         let cachedSafeMacs = [];
+        let currentPage = 1;
+        const itemsPerPage = 50;
 
         function showTab(tabId, el) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -204,29 +291,145 @@ HTML_TEMPLATE = """
             document.getElementById(tabId).classList.add('active');
             el.classList.add('active');
             currentTab = tabId;
-            if (tabId === 'history') loadHistoryList();
-            if (tabId === 'cars') loadCarsList();
-            if (tabId === 'regressions') loadRegressionsList();
-            if (tabId === 'analysis') loadAnalysis();
-            if (tabId === 'safe') loadSafeList();
+            currentPage = 1;
+            document.getElementById('global-search').value = '';
+            refreshTab();
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`Copied: ${text}`);
+            });
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerText = message;
+            toast.style.opacity = '1';
+            setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+        }
+
+        function refreshTab() {
+            if (currentTab === 'live') renderLiveTable(cachedLiveData);
+            if (currentTab === 'history') loadHistoryList();
+            if (currentTab === 'cars') loadCarsList();
+            if (currentTab === 'regressions') loadRegressionsList();
+            if (currentTab === 'analysis') loadAnalysis();
+            if (currentTab === 'safe') loadSafeList();
+            if (currentTab === 'maintenance') loadMaintenanceStats();
+        }
+
+        async function loadMaintenanceStats() {
+            const res = await fetch('/api/stats');
+            const data = await res.json();
+            document.getElementById('stat-size').innerText = data.size;
+            document.getElementById('stat-detections').innerText = data.detections.toLocaleString();
+            document.getElementById('stat-devices').innerText = data.devices.toLocaleString();
+        }
+
+        async function cleanOldRecords() {
+            if (!confirm('Are you sure you want to delete all records older than 30 days? This action cannot be undone.')) return;
+            
+            const status = document.getElementById('clean-status');
+            status.innerText = 'Cleaning...';
+            status.style.color = '#888';
+            
+            try {
+                const res = await fetch('/api/maintenance/clean', { method: 'POST' });
+                const data = await res.json();
+                status.innerText = `Success: ${data.deleted} records removed.`;
+                status.style.color = '#00cc66';
+                loadMaintenanceStats();
+            } catch (err) {
+                status.innerText = 'Error performing cleanup.';
+                status.style.color = '#ff3333';
+            }
+        }
+
+        function handleSearch() {
+            currentPage = 1;
+            refreshTab();
+        }
+
+        function getFilteredData(data) {
+            const query = document.getElementById('global-search').value.toLowerCase();
+            const hideSafe = document.getElementById('hide-safe').checked;
+            const hideUnknown = document.getElementById('hide-unknown').checked;
+            
+            let filtered = data;
+            if (query) {
+                filtered = filtered.filter(d => 
+                    (d.mac && d.mac.toLowerCase().includes(query)) || 
+                    (d.vendor && d.vendor.toLowerCase().includes(query)) || 
+                    (d.ssids && d.ssids.toLowerCase().includes(query))
+                );
+            }
+
+            if (hideSafe && currentTab !== 'safe') {
+                filtered = filtered.filter(d => !cachedSafeMacs.includes(d.mac));
+            }
+
+            if (hideUnknown) {
+                filtered = filtered.filter(d => {
+                    const isUnknown = d.vendor === 'Unknown';
+                    // Randomized MACs have 2, 6, A, or E as the second hex digit
+                    const isRandom = d.mac && /^[0-9a-f][26ae]/i.test(d.mac);
+                    return !isUnknown && !isRandom;
+                });
+            }
+            return filtered;
+        }
+
+        function renderPagination(totalItems) {
+            const container = document.getElementById('pagination-controls');
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            if (totalPages <= 1) { container.innerHTML = ''; return; }
+            
+            let html = `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">Prev</button>`;
+            
+            const start = Math.max(1, currentPage - 2);
+            const end = Math.min(totalPages, currentPage + 2);
+            
+            if (start > 1) html += '<button class="page-btn" onclick="changePage(1)">1</button><span>...</span>';
+            
+            for (let i = start; i <= end; i++) {
+                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+            }
+            
+            if (end < totalPages) html += `<span>...</span><button class="page-btn" onclick="changePage(${totalPages})">${totalPages}</button>`;
+            
+            html += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">Next</button>`;
+            container.innerHTML = html;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            refreshTab();
         }
 
         async function loadRegressionsList() {
             const res = await fetch('/api/regressions');
             const data = await res.json();
+            const filtered = getFilteredData(data);
+            renderPagination(filtered.length);
+            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+            
             const table = document.getElementById('regressions-table');
             let html = '';
-            data.forEach(dev => {
+            paged.forEach(dev => {
                 html += `
                     <tr>
-                        <td><code>${dev.mac}</code></td>
+                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
                         <td>${dev.vendor}</td>
                         <td><span class="badge">${dev.days_seen} days</span></td>
                         <td>${dev.hits}</td>
                         <td>${dev.first_seen}</td>
                         <td>${dev.last_seen}</td>
                         <td>
-                            <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                            <div style="display:flex; gap:5px;">
+                                <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
+                            </div>
                         </td>
                     </tr>`;
             });
@@ -236,19 +439,26 @@ HTML_TEMPLATE = """
         async function loadCarsList() {
             const res = await fetch('/api/cars');
             const data = await res.json();
+            const filtered = getFilteredData(data);
+            renderPagination(filtered.length);
+            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
             const table = document.getElementById('cars-table');
             let html = '';
-            data.forEach(dev => {
+            paged.forEach(dev => {
                 html += `
                     <tr>
-                        <td><code>${dev.mac}</code></td>
+                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
                         <td>${dev.vendor}</td>
                         <td><span class="badge">${dev.hits}</span></td>
                         <td>${dev.first_seen}</td>
                         <td>${dev.last_seen}</td>
-                        <td>${dev.ssids || ''}</td>
+                        <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
                         <td>
-                            <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                            <div style="display:flex; gap:5px;">
+                                <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
+                            </div>
                         </td>
                     </tr>`;
             });
@@ -305,10 +515,9 @@ HTML_TEMPLATE = """
 
         async function renderLiveTable(data) {
             const table = document.getElementById('live-table');
-            const hideSafe = document.getElementById('hide-safe').checked;
-            
-            let html = '';
-            const sortedData = [...data].sort((a, b) => {
+            let filtered = getFilteredData(data);
+
+            const sortedData = [...filtered].sort((a, b) => {
                 let valA = a[liveSort.column] || '';
                 let valB = b[liveSort.column] || '';
                 if (liveSort.column === 'hits') { valA = parseInt(valA); valB = parseInt(valB); }
@@ -317,11 +526,27 @@ HTML_TEMPLATE = """
                 return 0;
             });
 
-            sortedData.forEach(dev => {
+            renderPagination(sortedData.length);
+            const paged = sortedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+            let html = '';
+            paged.forEach(dev => {
                 const isSafe = cachedSafeMacs.includes(dev.mac);
-                if (hideSafe && isSafe) return;
                 const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : `<button class="btn btn-safe" onclick="markSafe('${dev.mac}')">Mark Safe</button>`;
-                html += `<tr><td><code>${dev.mac}</code></td><td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td><td>${dev.vendor}</td><td><span class="badge">${dev.hits}</span></td><td>${dev.last_seen}</td><td>${dev.ssids || ''}</td><td>${btn}</td></tr>`;
+                html += `<tr>
+                    <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
+                    <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
+                    <td>${dev.vendor}</td>
+                    <td><span class="badge">${dev.hits}</span></td>
+                    <td>${dev.last_seen}</td>
+                    <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
+                    <td>
+                        <div style="display:flex; gap:5px;">
+                            ${btn}
+                            <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button>
+                        </div>
+                    </td>
+                </tr>`;
             });
             table.innerHTML = html;
         }
@@ -337,10 +562,13 @@ HTML_TEMPLATE = """
         async function loadHistoryList() {
             const res = await fetch('/api/data');
             const data = await res.json();
+            const filtered = getFilteredData(data);
+            const displayData = filtered.slice(0, 500); 
+
             const list = document.getElementById('device-list');
-            list.innerHTML = '<h3>All Devices</h3>';
+            list.innerHTML = `<h3>Devices (${filtered.length})</h3>`;
             const fragment = document.createDocumentFragment();
-            data.forEach(dev => {
+            displayData.forEach(dev => {
                 const div = document.createElement('div');
                 div.className = `device-item ${selectedMac === dev.mac ? 'selected' : ''}`;
                 div.onclick = () => loadTimeline(dev.mac);
@@ -348,6 +576,12 @@ HTML_TEMPLATE = """
                 fragment.appendChild(div);
             });
             list.appendChild(fragment);
+            if (filtered.length > 500) {
+                const more = document.createElement('div');
+                more.style = 'text-align:center; padding:10px; color:#888;';
+                more.innerText = 'Use search to find more...';
+                list.appendChild(more);
+            }
         }
 
         async function loadTimeline(mac) {
@@ -368,9 +602,13 @@ HTML_TEMPLATE = """
         async function loadAnalysis() {
             const res = await fetch('/api/analysis');
             const data = await res.json();
+            const filtered = getFilteredData(data);
+            renderPagination(filtered.length);
+            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
             const table = document.getElementById('analysis-table');
             let html = '';
-            data.forEach(r => {
+            paged.forEach(r => {
                 const scoreClass = r.score > 60 ? 'score-high' : (r.score > 30 ? 'score-mid' : 'score-low');
                 html += `<tr><td><code>${r.mac}</code></td><td class="${scoreClass}">${r.score}</td><td>${r.vendor}</td><td>${r.reasons}</td><td>${r.ssids || ''}</td><td><button class="btn btn-safe" onclick="markSafe('${r.mac}')">Mark Safe</button></td></tr>`;
             });
@@ -380,9 +618,13 @@ HTML_TEMPLATE = """
         async function loadSafeList() {
             const res = await fetch('/api/safe_list');
             const data = await res.json();
+            const filtered = getFilteredData(data);
+            renderPagination(filtered.length);
+            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
             const table = document.getElementById('safe-table');
             let html = '';
-            data.forEach(dev => {
+            paged.forEach(dev => {
                 html += `
                     <tr>
                         <td><code>${dev.mac}</code></td>
@@ -416,7 +658,7 @@ def index(): return render_template_string(HTML_TEMPLATE)
 
 @app.route('/api/data')
 def get_data():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     cursor.execute('SELECT mac, type, vendor, hits, last_seen, ssids FROM device_summary ORDER BY last_seen DESC')
     cols = [c[0] for c in cursor.description]
@@ -427,7 +669,7 @@ def get_data():
 @app.route('/api/history')
 def get_history():
     mac = request.args.get('mac')
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     # Use the index on mac
     cursor.execute('SELECT type, ssid, timestamp FROM detections WHERE mac = ? ORDER BY timestamp DESC LIMIT 1000', (mac,))
@@ -439,7 +681,7 @@ def get_history():
 @app.route('/api/mark_safe', methods=['POST'])
 def mark_safe():
     mac = request.json.get('mac')
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.execute('INSERT OR IGNORE INTO safe_devices (mac) VALUES (?)', (mac,))
     conn.commit()
     conn.close()
@@ -448,7 +690,7 @@ def mark_safe():
 @app.route('/api/unmark_safe', methods=['POST'])
 def unmark_safe():
     mac = request.json.get('mac')
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.execute('DELETE FROM safe_devices WHERE mac = ?', (mac,))
     conn.commit()
     conn.close()
@@ -456,7 +698,7 @@ def unmark_safe():
 
 @app.route('/api/safe_list')
 def safe_list():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT 
@@ -480,7 +722,7 @@ def safe_list():
 @app.route('/api/is_safe')
 def is_safe():
     mac = request.args.get('mac')
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM safe_devices WHERE mac = ?', (mac,))
     res = cursor.fetchone()
@@ -489,7 +731,7 @@ def is_safe():
 
 @app.route('/api/analysis')
 def get_analysis():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     # Only analyze devices seen in the last 24 hours to reduce memory load, 
     # but include their full history for those specific MACs.
     # First, get candidate MACs
@@ -537,7 +779,7 @@ def get_analysis():
 
 @app.route('/api/cars')
 def get_cars():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     like_clauses = " OR ".join(["vendor LIKE ?" for _ in CAR_VENDORS])
     params = [f"%{v}%" for v in CAR_VENDORS]
@@ -562,7 +804,7 @@ def get_cars():
 
 @app.route('/api/regressions')
 def get_regressions():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     cursor = conn.cursor()
     # For regressions, we still need some detail from detections if we want 'days_seen',
     # but we can optimize it by first filtering device_summary.
@@ -585,6 +827,69 @@ def get_regressions():
     data = [dict(zip(cols, r)) for r in cursor.fetchall()]
     conn.close()
     return jsonify(data)
+
+@app.route('/api/stats')
+def get_stats():
+    size_bytes = os.path.getsize(DB_FILE) if os.path.exists(DB_FILE) else 0
+    size_str = f"{size_bytes / (1024*1024):.2f} MB" if size_bytes > 1024*1024 else f"{size_bytes / 1024:.2f} KB"
+    
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM detections')
+    total_detections = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM device_summary')
+    total_devices = cursor.fetchone()[0]
+    conn.close()
+    
+    return jsonify({
+        "size": size_str,
+        "detections": total_detections,
+        "devices": total_devices
+    })
+
+@app.route('/api/maintenance/clean', methods=['POST'])
+def clean_maintenance():
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    cursor = conn.cursor()
+    # Delete detections older than 30 days
+    cursor.execute("DELETE FROM detections WHERE timestamp < datetime('now', '-30 days')")
+    deleted = cursor.rowcount
+    
+    # We don't delete from device_summary because it's a summary of all-time, 
+    # but the user might want to clean inactive devices too. 
+    # For now, just detections.
+    
+    conn.commit()
+    try:
+        conn.execute("VACUUM") # Reclaim space
+    except sqlite3.OperationalError:
+        # If the database is busy (e.g. sniffer is writing), skip VACUUM
+        pass
+    conn.close()
+    return jsonify({"status": "success", "deleted": deleted})
+
+@app.route('/api/export/ssid')
+def export_ssid():
+    ssid = request.args.get('ssid')
+    if not ssid:
+        return "SSID required", 400
+        
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    cursor = conn.cursor()
+    cursor.execute('SELECT timestamp, mac, type, vendor, ssid FROM detections WHERE ssid = ? ORDER BY timestamp DESC', (ssid,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Timestamp', 'MAC', 'Type', 'Vendor', 'SSID'])
+    writer.writerows(rows)
+    
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-disposition": f"attachment; filename=history_{ssid}.csv"}
+    )
 
 if __name__ == "__main__":
     init_db()

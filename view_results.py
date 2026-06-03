@@ -15,7 +15,8 @@ def view_data():
 
     try:
         while True:
-            conn = sqlite3.connect(DB_FILE)
+            conn = sqlite3.connect(DB_FILE, timeout=30)
+            conn.execute('PRAGMA journal_mode=WAL')
             cursor = conn.cursor()
             
             # Use the optimized summary table
