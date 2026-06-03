@@ -326,8 +326,25 @@ HTML_TEMPLATE = """
         }
 
         function copyToClipboard(text) {
+            if (!navigator.clipboard) {
+                // Fallback for non-secure contexts (like some SSH tunnel setups)
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast(`Copied: ${text}`);
+                } catch (err) {
+                    console.error('Fallback copy failed', err);
+                }
+                document.body.removeChild(textArea);
+                return;
+            }
             navigator.clipboard.writeText(text).then(() => {
                 showToast(`Copied: ${text}`);
+            }).catch(err => {
+                console.error('Clipboard write failed', err);
             });
         }
 
@@ -349,11 +366,15 @@ HTML_TEMPLATE = """
         }
 
         async function loadMaintenanceStats() {
-            const res = await fetch('/api/stats');
-            const data = await res.json();
-            document.getElementById('stat-size').innerText = data.size;
-            document.getElementById('stat-detections').innerText = data.detections.toLocaleString();
-            document.getElementById('stat-devices').innerText = data.devices.toLocaleString();
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                document.getElementById('stat-size').innerText = data.size;
+                document.getElementById('stat-detections').innerText = data.detections.toLocaleString();
+                document.getElementById('stat-devices').innerText = data.devices.toLocaleString();
+            } catch (e) {
+                console.error("Failed to load maintenance stats:", e);
+            }
         }
 
         async function cleanOldRecords() {
@@ -437,63 +458,81 @@ HTML_TEMPLATE = """
         }
 
         async function loadRegressionsList() {
-            const res = await fetch('/api/regressions');
-            const data = await res.json();
-            currentRawData = data;
-            const filtered = getFilteredData(data);
-            renderPagination(filtered.length);
-            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-            
-            const table = document.getElementById('regressions-table');
-            let html = '';
-            paged.forEach(dev => {
-                html += `
-                    <tr>
-                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                        <td>${dev.vendor}</td>
-                        <td><span class="badge">${dev.days_seen} days</span></td>
-                        <td>${dev.hits}</td>
-                        <td>${dev.first_seen}</td>
-                        <td>${dev.last_seen}</td>
-                        <td>
-                            <div style="display:flex; gap:5px;">
-                                <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
-                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
-                            </div>
-                        </td>
-                    </tr>`;
-            });
-            table.innerHTML = html;
+            try {
+                const res = await fetch('/api/regressions');
+                const data = await res.json();
+                currentRawData = data;
+                const filtered = getFilteredData(data);
+                renderPagination(filtered.length);
+                const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+                
+                const table = document.getElementById('regressions-table');
+                let html = '';
+                if (paged.length === 0) {
+                    const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No regressions found with current filters.';
+                    html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                } else {
+                    paged.forEach(dev => {
+                        html += `
+                            <tr>
+                                <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
+                                <td>${dev.vendor}</td>
+                                <td><span class="badge">${dev.days_seen} days</span></td>
+                                <td>${dev.hits}</td>
+                                <td>${dev.first_seen}</td>
+                                <td>${dev.last_seen}</td>
+                                <td>
+                                    <div style="display:flex; gap:5px;">
+                                        <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                                        <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                    });
+                }
+                table.innerHTML = html;
+            } catch (e) {
+                console.error("Failed to load regressions:", e);
+            }
         }
 
         async function loadCarsList() {
-            const res = await fetch('/api/cars');
-            const data = await res.json();
-            currentRawData = data;
-            const filtered = getFilteredData(data);
-            renderPagination(filtered.length);
-            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+            try {
+                const res = await fetch('/api/cars');
+                const data = await res.json();
+                currentRawData = data;
+                const filtered = getFilteredData(data);
+                renderPagination(filtered.length);
+                const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-            const table = document.getElementById('cars-table');
-            let html = '';
-            paged.forEach(dev => {
-                html += `
-                    <tr>
-                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                        <td>${dev.vendor}</td>
-                        <td><span class="badge">${dev.hits}</span></td>
-                        <td>${dev.first_seen}</td>
-                        <td>${dev.last_seen}</td>
-                        <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
-                        <td>
-                            <div style="display:flex; gap:5px;">
-                                <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
-                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
-                            </div>
-                        </td>
-                    </tr>`;
-            });
-            table.innerHTML = html;
+                const table = document.getElementById('cars-table');
+                let html = '';
+                if (paged.length === 0) {
+                    const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No cars found with current filters.';
+                    html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                } else {
+                    paged.forEach(dev => {
+                        html += `
+                            <tr>
+                                <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
+                                <td>${dev.vendor}</td>
+                                <td><span class="badge">${dev.hits}</span></td>
+                                <td>${dev.first_seen}</td>
+                                <td>${dev.last_seen}</td>
+                                <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
+                                <td>
+                                    <div style="display:flex; gap:5px;">
+                                        <button class="btn btn-safe" onclick="showHistory('${dev.mac}')">View Logs</button>
+                                        <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}')" title="Copy Row">Row</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                    });
+                }
+                table.innerHTML = html;
+            } catch (e) {
+                console.error("Failed to load cars:", e);
+            }
         }
 
         function showHistory(mac) {
@@ -561,24 +600,29 @@ HTML_TEMPLATE = """
             const paged = sortedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
             let html = '';
-            paged.forEach(dev => {
-                const isSafe = cachedSafeMacs.includes(dev.mac);
-                const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : `<button class="btn btn-safe" onclick="markSafe('${dev.mac}')">Mark Safe</button>`;
-                html += `<tr>
-                    <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
-                    <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
-                    <td>${dev.vendor}</td>
-                    <td><span class="badge">${dev.hits}</span></td>
-                    <td>${dev.last_seen}</td>
-                    <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
-                    <td>
-                        <div style="display:flex; gap:5px;">
-                            ${btn}
-                            <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button>
-                        </div>
-                    </td>
-                </tr>`;
-            });
+            if (paged.length === 0) {
+                const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No results found with current filters.';
+                html = `<tr><td colspan="7" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+            } else {
+                paged.forEach(dev => {
+                    const isSafe = cachedSafeMacs.includes(dev.mac);
+                    const btn = isSafe ? '<span style="color:#0c6;">Safe</span>' : `<button class="btn btn-safe" onclick="markSafe('${dev.mac}')">Mark Safe</button>`;
+                    html += `<tr>
+                        <td><code>${dev.mac}</code> <button class="copy-btn" onclick="copyToClipboard('${dev.mac}')" title="Copy MAC">📋</button></td>
+                        <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
+                        <td>${dev.vendor}</td>
+                        <td><span class="badge">${dev.hits}</span></td>
+                        <td>${dev.last_seen}</td>
+                        <td>${(dev.ssids || '').split(',').map(s => s ? `<a href="/api/export/ssid?ssid=${encodeURIComponent(s)}" title="Export History to CSV" style="color:#00ffcc; text-decoration:none; border-bottom:1px dotted #00ffcc;">${s}</a>` : '').join(', ')}</td>
+                        <td>
+                            <div style="display:flex; gap:5px;">
+                                ${btn}
+                                <button class="btn btn-safe" style="background:#555;" onclick="copyToClipboard('${dev.mac}, ${dev.vendor}, ${dev.ssids || ''}')" title="Copy Row">Row</button>
+                            </div>
+                        </td>
+                    </tr>`;
+                });
+            }
             table.innerHTML = html;
         }
 
@@ -592,97 +636,155 @@ HTML_TEMPLATE = """
         }
 
         async function loadHistoryList() {
-            const res = await fetch('/api/data');
-            const data = await res.json();
-            currentRawData = data;
-            const filtered = getFilteredData(data);
-            const displayData = filtered.slice(0, 500); 
+            try {
+                const res = await fetch('/api/data');
+                const data = await res.json();
+                currentRawData = data;
+                const filtered = getFilteredData(data);
+                const displayData = filtered.slice(0, 500); 
 
-            const list = document.getElementById('device-list');
-            list.innerHTML = `<h3>Devices (${filtered.length})</h3>`;
-            const fragment = document.createDocumentFragment();
-            displayData.forEach(dev => {
-                const div = document.createElement('div');
-                div.className = `device-item ${selectedMac === dev.mac ? 'selected' : ''}`;
-                div.onclick = () => loadTimeline(dev.mac);
-                div.innerHTML = `<strong>${dev.mac}</strong><br><small>${dev.vendor}</small><br><small style="color: #888;">${dev.ssids || ''}</small>`;
-                fragment.appendChild(div);
-            });
-            list.appendChild(fragment);
-            if (filtered.length > 500) {
-                const more = document.createElement('div');
-                more.style = 'text-align:center; padding:10px; color:#888;';
-                more.innerText = 'Use search to find more...';
-                list.appendChild(more);
+                const list = document.getElementById('device-list');
+                list.innerHTML = `<h3>Devices (${filtered.length})</h3>`;
+                if (filtered.length === 0) {
+                    const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No devices match filters.';
+                    list.innerHTML += `<div style="text-align:center; padding:20px; color:#888;">${msg}</div>`;
+                    return;
+                }
+                const fragment = document.createDocumentFragment();
+                displayData.forEach(dev => {
+                    const div = document.createElement('div');
+                    div.className = `device-item ${selectedMac === dev.mac ? 'selected' : ''}`;
+                    div.onclick = () => loadTimeline(dev.mac);
+                    div.innerHTML = `<strong>${dev.mac}</strong><br><small>${dev.vendor}</small><br><small style="color: #888;">${dev.ssids || ''}</small>`;
+                    fragment.appendChild(div);
+                });
+                list.appendChild(fragment);
+                if (filtered.length > 500) {
+                    const more = document.createElement('div');
+                    more.style = 'text-align:center; padding:10px; color:#888;';
+                    more.innerText = 'Use search to find more...';
+                    list.appendChild(more);
+                }
+            } catch (e) {
+                console.error("Failed to load device list:", e);
             }
         }
 
         async function loadTimeline(mac) {
-            selectedMac = mac;
-            loadHistoryList();
-            const [resHist, resSafe] = await Promise.all([fetch(`/api/history?mac=${mac}`), fetch(`/api/is_safe?mac=${mac}`)]);
-            const logs = await resHist.json();
-            const isSafe = (await resSafe.json()).safe;
-            
-            const timeline = document.getElementById('timeline');
-            let html = `<div style="display:flex; justify-content:space-between; align-items:center;"><h3>History: ${mac}</h3>${isSafe ? '<span style="color:#0c6;">[SAFE]</span>' : `<button class="btn btn-safe" onclick="markSafe('${mac}')">Mark Safe</button>`}</div>`;
-            html += '<table><thead><tr><th>Time</th><th>Type</th><th>SSID</th></tr></thead><tbody>';
-            logs.forEach(l => { html += `<tr><td>${l.timestamp}</td><td>${l.type}</td><td>${l.ssid || ''}</td></tr>`; });
-            html += '</tbody></table>';
-            timeline.innerHTML = html;
+            try {
+                selectedMac = mac;
+                loadHistoryList();
+                const [resHist, resSafe] = await Promise.all([fetch(`/api/history?mac=${mac}`), fetch(`/api/is_safe?mac=${mac}`)]);
+                const logs = await resHist.json();
+                const isSafe = (await resSafe.json()).safe;
+                
+                const timeline = document.getElementById('timeline');
+                let html = `<div style="display:flex; justify-content:space-between; align-items:center;"><h3>History: ${mac}</h3>${isSafe ? '<span style="color:#0c6;">[SAFE]</span>' : `<button class="btn btn-safe" onclick="markSafe('${mac}')">Mark Safe</button>`}</div>`;
+                html += '<table><thead><tr><th>Time</th><th>Type</th><th>SSID</th></tr></thead><tbody>';
+                logs.forEach(l => { html += `<tr><td>${l.timestamp}</td><td>${l.type}</td><td>${l.ssid || ''}</td></tr>`; });
+                html += '</tbody></table>';
+                timeline.innerHTML = html;
+            } catch (e) {
+                console.error("Failed to load timeline:", e);
+                document.getElementById('timeline').innerHTML = `<h3 style="color:#ff3333;">Error loading history for ${mac}</h3>`;
+            }
         }
 
         async function loadAnalysis() {
-            const res = await fetch('/api/analysis');
-            const data = await res.json();
-            currentRawData = data;
-            const filtered = getFilteredData(data);
-            renderPagination(filtered.length);
-            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+            try {
+                const res = await fetch('/api/analysis');
+                const data = await res.json();
+                currentRawData = data;
+                const filtered = getFilteredData(data);
+                renderPagination(filtered.length);
+                const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-            const table = document.getElementById('analysis-table');
-            let html = '';
-            paged.forEach(r => {
-                const scoreClass = r.score > 60 ? 'score-high' : (r.score > 30 ? 'score-mid' : 'score-low');
-                html += `<tr><td><code>${r.mac}</code></td><td class="${scoreClass}">${r.score}</td><td>${r.vendor}</td><td>${r.reasons}</td><td>${r.ssids || ''}</td><td><button class="btn btn-safe" onclick="markSafe('${r.mac}')">Mark Safe</button></td></tr>`;
-            });
-            table.innerHTML = html;
+                const table = document.getElementById('analysis-table');
+                let html = '';
+                if (paged.length === 0) {
+                    const msg = data.length === 0 ? 'Please wait, collecting data...' : 'No anomalies found with current filters.';
+                    html = `<tr><td colspan="6" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                } else {
+                    paged.forEach(r => {
+                        const scoreClass = r.score > 60 ? 'score-high' : (r.score > 30 ? 'score-mid' : 'score-low');
+                        html += `<tr><td><code>${r.mac}</code></td><td class="${scoreClass}">${r.score}</td><td>${r.vendor}</td><td>${r.reasons}</td><td>${r.ssids || ''}</td><td><button class="btn btn-safe" onclick="markSafe('${r.mac}')">Mark Safe</button></td></tr>`;
+                    });
+                }
+                table.innerHTML = html;
+            } catch (e) {
+                console.error("Failed to load analysis:", e);
+            }
         }
 
         async function loadSafeList() {
-            const res = await fetch('/api/safe_list');
-            const data = await res.json();
-            currentRawData = data;
-            const filtered = getFilteredData(data);
-            renderPagination(filtered.length);
-            const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+            try {
+                const res = await fetch('/api/safe_list');
+                const data = await res.json();
+                currentRawData = data;
+                const filtered = getFilteredData(data);
+                renderPagination(filtered.length);
+                const paged = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-            const table = document.getElementById('safe-table');
-            let html = '';
-            paged.forEach(dev => {
-                html += `
-                    <tr>
-                        <td><code>${dev.mac}</code></td>
-                        <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
-                        <td>${dev.vendor}</td>
-                        <td><span class="badge">${dev.hits}</span></td>
-                        <td>${dev.first_seen}</td>
-                        <td>${dev.last_seen}</td>
-                        <td>${dev.ssids || ''}</td>
-                        <td>${dev.marked_at}</td>
-                        <td><button class="btn btn-unsafe" onclick="unmarkSafe('${dev.mac}')">Unmark</button></td>
-                    </tr>`;
-            });
-            table.innerHTML = html;
+                const table = document.getElementById('safe-table');
+                let html = '';
+                if (paged.length === 0) {
+                    const msg = data.length === 0 ? 'No safe devices recorded yet.' : 'No results found with current filters.';
+                    html = `<tr><td colspan="9" style="text-align:center; padding:50px; color:#888;">${msg}</td></tr>`;
+                } else {
+                    paged.forEach(dev => {
+                        html += `
+                            <tr>
+                                <td><code>${dev.mac}</code></td>
+                                <td class="${dev.type === 'Access Point' ? 'type-ap' : 'type-dev'}">${dev.type}</td>
+                                <td>${dev.vendor}</td>
+                                <td><span class="badge">${dev.hits}</span></td>
+                                <td>${dev.first_seen}</td>
+                                <td>${dev.last_seen}</td>
+                                <td>${dev.ssids || ''}</td>
+                                <td>${dev.marked_at}</td>
+                                <td><button class="btn btn-unsafe" onclick="unmarkSafe('${dev.mac}')">Unmark</button></td>
+                            </tr>`;
+                    });
+                }
+                table.innerHTML = html;
+            } catch (e) {
+                console.error("Failed to load safe list:", e);
+            }
+        }
+
+        // Improved update loop to handle slow connections
+        async function runUpdateLoop() {
+            try {
+                if (currentTab === 'live') {
+                    await updateLive();
+                }
+            } catch (e) {
+                console.error("Update loop error:", e);
+            }
+            setTimeout(runUpdateLoop, 2000);
+        }
+
+        async function runSafeCacheLoop() {
+            try {
+                await updateSafeCache();
+            } catch (e) {
+                console.error("Safe cache update error:", e);
+            }
+            setTimeout(runSafeCacheLoop, 10000);
         }
 
         // Initial load
-        updateSafeCache().then(() => {
-            updateLive();
-            setInterval(updateLive, 2000);
-            // Refresh safe cache less frequently
-            setInterval(updateSafeCache, 10000);
-        });
+        (async function init() {
+            console.log("Initializing WIFISNIFFER Dashboard...");
+            try {
+                await updateSafeCache();
+                await updateLive();
+            } catch (e) {
+                console.error("Initial load error:", e);
+            }
+            runUpdateLoop();
+            runSafeCacheLoop();
+        })();
     </script>
 </body>
 </html>
